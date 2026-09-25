@@ -12,9 +12,9 @@
 
 ## ⚡ About
 
-A **Smart Line Fault Detection & Monitoring System** designed for **Low Tension (LT) power lines** using **ESP32 microcontrollers**. The system detects line faults, locates their position, and automatically isolates the faulty section while sending real-time alerts to the control center.
+**Line_IQ -** A **Smart Line Fault Detection & Monitoring System** designed for **Low Tension (LT) power lines** using **ESP32 microcontrollers**. The system detects line faults, locates their position, and automatically isolates the faulty section while sending real-time alerts to the control center.
 
-> Developed by **Team Cypher Tech** — addressing the critical gap where traditional circuit breakers fail to detect LT line breaks.
+> Developed by **Team Runtime Hackers** — addressing the critical gap where traditional circuit breakers fail to detect LT line breaks.
 
 ---
 
@@ -137,7 +137,7 @@ if (current < FAULT_THRESHOLD || vibration > VIBRATION_THRESHOLD) {
 
 ## 👥 Team
 
-**Team Cypher Tech**
+**Team Runtime Hackers**
 
 ---
 
@@ -148,5 +148,5 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 <div align="center">
-  Made with ❤️ by <a href="https://priyanshuchand.netlify.app/">Priyanshu Chand</a> & Team Cypher Tech
+  Made with ❤️ by <a href="https://priyanshuchand.netlify.app/">Deepak Sharma</a> & Team Runtime Hackers
 </div>
