@@ -43,7 +43,7 @@
 | Jumper Wires | 1 set | Male-to-Male and Male-to-Female connections |
 | USB Cables | 2 | Flashing code & powering ESP32s |
 
-> See [`COMPONENTS.md`](COMPONENTS.md) for detailed wiring diagrams and pin mappings.
+> See [`CONNECTIONS.md`](CONNECTIONS.md) for the full circuit diagram and step-by-step wiring guide, and [`COMPONENTS.md`](COMPONENTS.md) for the detailed parts list.
 
 ---
 
