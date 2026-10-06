@@ -148,5 +148,5 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 <div align="center">
-  Made with ❤️ by <a href="https://priyanshuchand.netlify.app/">Deepak Sharma</a> & Team Runtime Hackers
+  Made with ❤️ by Deepak Sharma & Team Runtime Hackers
 </div>

@@ -1,12 +1,10 @@
 #include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
+#include <WebServer.h>
 #include "EmonLib.h"
-#include <ArduinoJson.h>
 
 // -------------------- CONFIG --------------------
-const char* ssid = "Airtel_Bachelor";
-const char* password = "Dypiu_fckoff01";
+const char* ssid = "Daddy_Devil";
+const char* password = "12345678a";
 
 #define ADC_PIN 34
 #define RELAY_PIN 23
@@ -26,11 +24,12 @@ const int SAMPLE_COUNT = 1480;
 const unsigned long MEASURE_INTERVAL_MS_DEFAULT = 1000; 
 
 // -------------------- STATE --------------------
-volatile float lastIrmsPole1 = 0.0f;
-volatile float lastIrmsPole2 = 0.0f;
-volatile bool relayState = false;
+float lastIrmsPole1 = 0.0f;
+float lastIrmsPole2 = 0.0f;
+bool relayState = false;
+unsigned long lastPole2UpdateMs = 0; // Tracks last time we received UART data
 
-AsyncWebServer server(80);
+WebServer server(80);
 
 // timing
 unsigned long lastMeasureMs = 0;
@@ -40,39 +39,8 @@ unsigned long lastWifiCheck = 0;
 // Pole2 UART buffer
 String pole2Buf;
 
-// -------------------- SETUP --------------------
-void setup() {
-  Serial.begin(115200);
-  analogReadResolution(12);
-
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);
-
-  // EmonLib calibration value for CT sensor
-  emon1.current(ADC_PIN, 30.0);
-
-  // UART for Pole2
-  pole2Serial.begin(9600, SERIAL_8N1, POLE2_RX_PIN, POLE2_TX_PIN);
-
-  // Wi-Fi
-  WiFi.setHostname("pole-monitor-esp32");
-  Serial.printf("Connecting to WiFi SSID: %s\n", ssid);
-  WiFi.begin(ssid, password);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-    delay(250);
-    Serial.print(".");
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected");
-    Serial.print("IP: "); Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nWiFi connect timed out — continuing (will retry in loop).");
-  }
-
-  // ---------- Web UI: root (dashboard) ----------
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    String html = R"rawliteral(
+// -------------------- WEB PAGE --------------------
+const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!doctype html>
 <html lang="en">
 <head>
@@ -106,9 +74,6 @@ void setup() {
     .meta{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
     .btn{padding:10px 14px;border-radius:10px;border:0;background:linear-gradient(90deg,var(--accent1),var(--accent2));color:white;font-weight:700;cursor:pointer;box-shadow:0 8px 24px rgba(6,182,212,.25)}
     .chart{width:100%;height:220px;display:block}
-    .shimmer{position:relative;overflow:hidden}
-    .shimmer::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:sh 1.2s infinite}
-    @keyframes sh{100%{transform:translateX(100%)}}
     @media(max-width:900px){.box{grid-column:span 12}.big{font-size:34px}}
   </style>
 </head>
@@ -129,7 +94,7 @@ void setup() {
       <div class="box">
         <div>
           <h3>Pole 1</h3>
-          <div class="big shimmer" id="p1">0.00 A</div>
+          <div class="big" id="p1">0.00 A</div>
           <div class="small">RMS Current — local CT</div>
         </div>
         <div>
@@ -141,24 +106,12 @@ void setup() {
       <div class="box">
         <div>
           <h3>Pole 2</h3>
-          <div class="big shimmer" id="p2">0.00 A</div>
+          <div class="big" id="p2">0.00 A</div>
           <div class="small">RMS Current — UART</div>
         </div>
         <div>
           <div class="meta"><div class="small">Updated: <span id="t2">--</span></div></div>
           <div class="strip" id="s2" style="background:linear-gradient(90deg,var(--accent3),var(--accent2))"></div>
-        </div>
-      </div>
-
-      <div class="box">
-        <div>
-          <h3>GPS</h3>
-          <div class="big" id="gps">--</div>
-          <div class="small">Hardcoded device location</div>
-        </div>
-        <div class="meta" style="justify-content:space-between">
-          <div class="small">Place: DY Patil International University</div>
-          <a id="mapsLink" class="btn" href="#" target="_blank" rel="noopener">Open in Maps</a>
         </div>
       </div>
 
@@ -184,15 +137,11 @@ void setup() {
         </div>
       </div>
     </div>
-
-    <div class="small" style="margin-top:12px;text-align:center;color:var(--muted)">Data source: /data</div>
   </div>
 
   <script>
     let first = true; const THRESH=1.0;
-    // DY Patil International University, Akurdi, Pune
-    const LAT = 18.654358, LNG = 73.772883;
-    const MAX_POINTS = 120; // 120s at 1Hz
+    const MAX_POINTS = 120;
     const hist1 = []; const hist2 = [];
     function drawChart(){
       const canvas = document.getElementById('chart');
@@ -204,38 +153,30 @@ void setup() {
       const ctx = canvas.getContext('2d');
       ctx.setTransform(dpr,0,0,dpr,0,0);
       ctx.clearRect(0,0,W,H);
-      // theme colors
-      const styles = getComputedStyle(document.documentElement);
       const gridC = 'rgba(255,255,255,0.08)';
-      const txtC = styles.getPropertyValue('--muted') || '#9fb0c8';
-      const c1 = styles.getPropertyValue('--accent1') || '#06b6d4';
-      const c2 = styles.getPropertyValue('--accent3') || '#ff7a59';
-      // padding
+      const txtC = '#9fb0c8';
+      const c1 = '#06b6d4';
+      const c2 = '#ff7a59';
       const pad = {l:36, r:10, t:10, b:20};
       const plotW = W - pad.l - pad.r; const plotH = H - pad.t - pad.b;
-      // scale
       let maxVal = Math.max(THRESH, 1, ...hist1, ...hist2);
-      // round up to nice step
       const steps = [0.5,1,2,5,10,20];
       let step = steps[0];
       for(let s of steps){ if(maxVal/ s <= 6){ step = s; break; } }
       maxVal = Math.ceil(maxVal/step)*step;
-      // grid
       ctx.strokeStyle = gridC; ctx.lineWidth = 1; ctx.beginPath();
       const ySteps = Math.max(2, Math.min(6, Math.round(maxVal/step)));
       for(let i=0;i<=ySteps;i++){
         const y = pad.t + plotH - (i/ySteps)*plotH; ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y);
       }
       ctx.stroke();
-      // labels
-      ctx.fillStyle = txtC; ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Arial'; ctx.textAlign='right'; ctx.textBaseline='middle';
+      ctx.fillStyle = txtC; ctx.font = '12px system-ui'; ctx.textAlign='right'; ctx.textBaseline='middle';
       for(let i=0;i<=ySteps;i++){
         const val = (i/ySteps)*maxVal; const y = pad.t + plotH - (i/ySteps)*plotH; ctx.fillText(val.toFixed(1)+' A', pad.l-6, y);
       }
-      // series draw helper
       function draw(series, color){
         if(series.length<2) return;
-        ctx.strokeStyle = color.trim(); ctx.lineWidth = 2; ctx.beginPath();
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
         const n = series.length; const dx = plotW/Math.max(1, MAX_POINTS-1);
         for(let i=0;i<n;i++){
           const x = pad.l + i*dx;
@@ -245,8 +186,8 @@ void setup() {
         }
         ctx.stroke();
       }
-      draw(hist1, c1 || '#06b6d4');
-      draw(hist2, c2 || '#ff7a59');
+      draw(hist1, c1);
+      draw(hist2, c2);
     }
     async function updateData(){
       try{
@@ -262,43 +203,71 @@ void setup() {
         const pill = document.getElementById('relay');
         if(d.relay){ pill.className='relay-pill on'; pill.textContent='ON'; } else { pill.className='relay-pill off'; pill.textContent='OFF'; }
         document.getElementById('lp').textContent = new Date().toLocaleTimeString();
-        // update history and redraw
         hist1.push(p1); hist2.push(p2);
         if(hist1.length>MAX_POINTS) hist1.shift();
         if(hist2.length>MAX_POINTS) hist2.shift();
         drawChart();
-        if(first){ document.querySelectorAll('.shimmer').forEach(e=>e.classList.remove('shimmer')); first=false; }
       }catch(e){ console.error(e); }
     }
     document.getElementById('refresh').addEventListener('click', updateData);
     setInterval(updateData,1000); updateData();
-
-    // Initialize GPS UI (static)
-    (function(){
-      const gpsEl = document.getElementById('gps');
-      const linkEl = document.getElementById('mapsLink');
-      if(gpsEl){ gpsEl.textContent = LAT.toFixed(6)+', '+LNG.toFixed(6); }
-      if(linkEl){ linkEl.href = 'https://www.google.com/maps?q='+LAT+','+LNG; }
-    })();
   </script>
 </body>
 </html>
 )rawliteral";
-    request->send(200,"text/html",html);
-  });
 
-  // ---------- /data endpoint (JSON) ----------
-  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){
-    StaticJsonDocument<128> doc;
-    doc["pole1"] = lastIrmsPole1;
-    doc["pole2"] = lastIrmsPole2;
-    doc["relay"] = relayState;
-    String out;
-    serializeJson(doc, out);
-    request->send(200, "application/json", out);
-  });
+// -------------------- SETUP --------------------
+void setup() {
+  Serial.begin(115200);
+  analogReadResolution(12);
 
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);
+
+  // EmonLib calibration value for ACS712 (5A module)
+  emon1.current(ADC_PIN, 5.41);
+
+  // UART for Pole2
+  pole2Serial.begin(9600, SERIAL_8N1, POLE2_RX_PIN, POLE2_TX_PIN);
+
+  // Wi-Fi
+  WiFi.setHostname("pole-monitor-esp32");
+  WiFi.setSleep(false);
+  Serial.printf("Connecting to WiFi SSID: %s\n", ssid);
+  WiFi.begin(ssid, password);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+    delay(250);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected");
+    Serial.print("IP: "); Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi connect timed out — continuing (will retry in loop).");
+  }
+
+  // Web routes
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/data", HTTP_GET, handleData);
   server.begin();
+  Serial.println("Web server started!");
+}
+
+// -------------------- Web Handlers --------------------
+void handleRoot() {
+  server.send(200, "text/html", INDEX_HTML);
+}
+
+void handleData() {
+  String json = "{\"pole1\":";
+  json += String(lastIrmsPole1, 3);
+  json += ",\"pole2\":";
+  json += String(lastIrmsPole2, 3);
+  json += ",\"relay\":";
+  json += relayState ? "true" : "false";
+  json += "}";
+  server.send(200, "application/json", json);
 }
 
 // -------------------- Pole2 UART parsing --------------------
@@ -323,6 +292,7 @@ void handlePole2Serial() {
           float f = line.toFloat();
           if (f >= 0.0f && f < 200.0f) {
             lastIrmsPole2 = f;
+            lastPole2UpdateMs = millis(); // Reset timeout counter
           }
         }
       }
@@ -335,6 +305,8 @@ void handlePole2Serial() {
 
 // -------------------- LOOP --------------------
 void loop() {
+  server.handleClient();
+  
   unsigned long now = millis();
 
   if (now - lastMeasureMs >= measureIntervalMs) {
@@ -343,22 +315,24 @@ void loop() {
     float measured = emon1.calcIrms(SAMPLE_COUNT);
     if (!(measured > 0.005f && measured < 200.0f)) measured = 0.0f;
 
-    // ✅ Force Pole1 = 0 if below 1A
-    if (measured < 1.0f) {
+    // Force Pole1 = 0 if below 0.05A (Noise cutoff)
+    if (measured < 0.05f) {
       lastIrmsPole1 = 0.0f;
     } else {
       lastIrmsPole1 = measured;
     }
 
-    if (!relayState && lastIrmsPole1 >= (CURRENT_THRESHOLD + HYSTERESIS)) {
+    // Automatically trip the breaker (turn bulb OFF) if Overcurrent OR if Pole 2 is offline!
+    if (!relayState && (lastIrmsPole1 >= (CURRENT_THRESHOLD + HYSTERESIS) || lastIrmsPole2 == 0.0f)) {
       digitalWrite(RELAY_PIN, HIGH);
       relayState = true;
-    } else if (relayState && lastIrmsPole1 <= (CURRENT_THRESHOLD - HYSTERESIS)) {
+    } 
+    // Restore power only if current is safe AND Pole 2 is back online
+    else if (relayState && lastIrmsPole1 <= (CURRENT_THRESHOLD - HYSTERESIS) && lastIrmsPole2 > 0.0f) {
       digitalWrite(RELAY_PIN, LOW);
       relayState = false;
     }
 
-    // ✅ Clean status print
     Serial.printf("[STATUS] Pole1: %.3f A | Pole2: %.3f A | Relay: %s\n",
                   lastIrmsPole1,
                   lastIrmsPole2,
@@ -366,6 +340,11 @@ void loop() {
   }
 
   handlePole2Serial();
+
+  // If we haven't received Pole 2 data in 4 seconds (4000ms), assume the wire is broken!
+  if (now - lastPole2UpdateMs > 4000) {
+    lastIrmsPole2 = 0.0f;
+  }
 
   if (WiFi.status() != WL_CONNECTED && (now - lastWifiCheck > 5000)) {
     lastWifiCheck = now;
