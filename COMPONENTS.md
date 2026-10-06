@@ -31,3 +31,27 @@ This document lists the final hardware components used for the physical prototyp
 *   **Voltage Sensors (ZMPT101B)** x2
 *   **Vibration Sensors** x2
 *   **GPS Module** x1
+
+## 🔌 High-Level Wiring Overview
+
+### AC Power Path (220V Live Wire — Series Circuit)
+```
+AC Plug (Live) → Pole 1 ACS712 → Pole 2 ACS712 → Relay (COM → NC) → Bulb Holder
+AC Plug (Neutral) → Bulb Holder (Direct)
+```
+
+### Data Path (3.3V UART — Between ESP32s)
+```
+Pole 2 ESP32 TX (G17) → Pole 1 ESP32 RX (G16)
+Pole 2 ESP32 GND       → Pole 1 ESP32 GND
+```
+
+### Pin Mapping
+
+| ESP32 Board | Pin | Connected To |
+|---|---|---|
+| **Pole 1 (Master)** | G34 | ACS712 Sensor 1 (Analog Out) |
+| **Pole 1 (Master)** | G23 | Relay Module (Signal/IN) |
+| **Pole 1 (Master)** | G16 (RX2) | Pole 2 G17 (TX) |
+| **Pole 2 (Slave)** | G34 | ACS712 Sensor 2 (Analog Out) |
+| **Pole 2 (Slave)** | G17 (TX) | Pole 1 G16 (RX2) |
