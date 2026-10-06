@@ -5,7 +5,7 @@
 
   [![C++](https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
   [![ESP32](https://img.shields.io/badge/ESP32-E7352C?style=for-the-badge&logo=espressif&logoColor=white)](https://espressif.com/)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+  [![Arduino](https://img.shields.io/badge/Arduino-00979D?style=for-the-badge&logo=arduino&logoColor=white)](https://www.arduino.cc/)
 </div>
 
 ---
@@ -20,11 +20,11 @@
 
 ## 🔌 Working Principle
 
-1. **Sensors** at each LT pole continuously measure current, voltage, and vibration
-2. **ESP32 Node 1 (`pole1.ino`)** detects abnormal readings and identifies potential line breaks
-3. **ESP32 Node 2 (`pole2.ino`)** receives the signal, triggers the **relay** to isolate the faulty section
-4. Both nodes log data and send real-time alerts to a **central dashboard** via Wi-Fi
-5. Fault location is estimated using timing differences between node responses
+1. **ACS712 Current Sensors** at each pole continuously measure the RMS current flowing through the LT power line
+2. **ESP32 Node 1 (Pole 1 — Master Hub)** reads its own sensor, hosts the live SCADA web dashboard over Wi-Fi, and monitors Pole 2's health via UART
+3. **ESP32 Node 2 (Pole 2 — Sensor Node)** reads its sensor and transmits the current data to Pole 1 over a hardwired UART serial link
+4. If Pole 1 detects **overcurrent** or **loses communication** with Pole 2 (4-second timeout), it automatically **trips the relay** to isolate the faulty section
+5. The live web dashboard displays real-time current graphs for both poles, relay status, and fault alerts — accessible from any device on the network
 
 ---
 
@@ -32,14 +32,18 @@
 
 | Component | Quantity | Purpose |
 |---|---|---|
-| ESP32 Microcontroller | 2 | Main processing & Wi-Fi |
-| Current Transformer (CT) Sensor | 1 per node | Current monitoring |
-| Voltage Sensor | 1 per node | Voltage monitoring |
-| Vibration Sensor | 1 per node | Line break vibration detection |
-| Relay Module | 1 | Auto fault isolation |
-| GPS Module *(optional)* | 1 | Precise fault location |
-| Power Supply / Solar Module | 1 | Field deployment power |
-| Jumper Wires & Breadboard | - | Prototyping |
+| ESP32 Wroom (38-pin) | 2 | Main microcontrollers — Pole 1 (Master/Dashboard) & Pole 2 (Sensor Node) |
+| ACS712 Current Sensor (5A) | 2 | Measures live AC current (Amps) at each pole |
+| 5V Relay Module | 1 | Smart circuit breaker — physically cuts AC power on fault detection |
+| Incandescent Bulb (60W/100W) | 1 | Simulates the household load at the end of the line |
+| Bulb Holder | 1 | Mounts the light bulb |
+| AC Wire / Cable | 1 set | Simulates the LT power line between poles |
+| 3-Pin AC Plug | 1 | Safe connection to mains power |
+| Breadboards | 2 | Solderless prototyping base |
+| Jumper Wires | 1 set | Male-to-Male and Male-to-Female connections |
+| USB Cables | 2 | Flashing code & powering ESP32s |
+
+> See [`COMPONENTS.md`](COMPONENTS.md) for detailed wiring diagrams and pin mappings.
 
 ---
 
@@ -47,8 +51,9 @@
 
 | File | Description |
 |---|---|
-| `pole1.ino` | Main ESP32 node — monitors sensors, detects faults, transmits data to control center |
-| `pole2.ino` | Secondary ESP32 node — receives fault signals, controls relay for section isolation |
+| `pole1/pole1.ino` | Master Hub — hosts the SCADA web dashboard, reads Pole 1 sensor, receives Pole 2 data over UART, controls the relay |
+| `pole2/pole2.ino` | Sensor Node — reads Pole 2 sensor and transmits current data to Pole 1 via UART |
+| `COMPONENTS.md` | Detailed hardware list, wiring overview, and pin mapping |
 
 ---
 
@@ -137,12 +142,6 @@ if (currentPole1 > OVERCURRENT_THRESHOLD || currentPole2 == 0) {
 ## 👥 Team
 
 **Team Runtime Hackers**
-
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
 
 ---
 
