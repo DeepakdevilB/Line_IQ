@@ -58,12 +58,11 @@
 LT Power Line
      |
   [Pole 1]                    [Pole 2]
-  ESP32 Node 1 ←─── Wi-Fi ───→ ESP32 Node 2
-  CT Sensor                    Relay Module
-  Voltage Sensor               CT Sensor
-  Vibration Sensor             Voltage Sensor
-       |                            |
-       └──────── Central Dashboard (Real-Time Alerts) ────────┘
+  ESP32 Node 1 ←─── UART ───→ ESP32 Node 2
+  ACS712 Sensor               ACS712 Sensor
+  Relay Module                
+       |                            
+       └───── Wi-Fi ─────→ Central Dashboard (Live Graphs & Relay Status)
 ```
 
 ---
@@ -72,10 +71,10 @@ LT Power Line
 
 ```cpp
 // Simplified detection logic in pole1.ino
-if (current < FAULT_THRESHOLD || vibration > VIBRATION_THRESHOLD) {
-    sendFaultAlert(pole2);         // Notify secondary node
-    logFaultData(timestamp, readings);
-    notifyDashboard(faultDetails);
+if (currentPole1 > OVERCURRENT_THRESHOLD || currentPole2 == 0) {
+    // Trip the relay immediately (Simulated Line Fault or Overcurrent)
+    digitalWrite(RELAY_PIN, HIGH); 
+    notifyDashboard("GRID FAULT DETECTED - POWER ISOLATED");
 }
 ```
 
@@ -86,30 +85,30 @@ if (current < FAULT_THRESHOLD || vibration > VIBRATION_THRESHOLD) {
 ### Prerequisites
 - Arduino IDE 2.x
 - ESP32 board package installed ([Installation Guide](https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html))
-- Required libraries: `WiFi.h`, `HTTPClient.h`
+- Required library: `EmonLib`
 
 ### Steps
 
 1. **Clone this repository**
    ```bash
-   git clone https://github.com/mystzoro/LT_Linefault-Detection.git
+   git clone https://github.com/DeepakdevilB/Line_IQ.git
    ```
 
-2. **Open Arduino IDE** and install the ESP32 board package
+2. **Open Arduino IDE** and install the ESP32 board package.
 
-3. **Configure Wi-Fi credentials** in both `.ino` files:
+3. **Configure Wi-Fi credentials** in `pole1/pole1.ino`:
    ```cpp
    const char* ssid = "YOUR_WIFI_SSID";
    const char* password = "YOUR_WIFI_PASSWORD";
    ```
 
-4. **Flash `pole1.ino`** to the first ESP32 board
+4. **Flash `pole1.ino`** to the first ESP32 board (Master Hub).
 
-5. **Flash `pole2.ino`** to the second ESP32 board
+5. **Flash `pole2.ino`** to the second ESP32 board (Sensor Node).
 
-6. **Connect sensors** per the hardware table above
+6. **Connect Hardware:** Wire the UART connection (G17 to G16) between the boards and connect the ACS712 and Relay in series with the AC load.
 
-7. **Power both nodes** and monitor the serial output
+7. **Access Dashboard:** Connect your device to the Wi-Fi hotspot and navigate to the IP address printed in the Serial Monitor (e.g., `http://10.63.44.228`) to view the live SCADA dashboard!
 
 ---
 
@@ -117,21 +116,21 @@ if (current < FAULT_THRESHOLD || vibration > VIBRATION_THRESHOLD) {
 
 | Feature | Traditional Circuit Breaker | This System |
 |---|---|---|
-| LT Line Break Detection | ❌ Cannot detect | ✅ Detects accurately |
-| Fault Location | ❌ Manual inspection | ✅ Estimated automatically |
+| LT Line Break Detection | ❌ Cannot detect | ✅ Detects accurately via node timeouts |
+| Fault Location | ❌ Manual inspection | ✅ Node-level precision |
 | Auto Isolation | ✅ Overcurrent only | ✅ Line break + overcurrent |
-| Real-time Alerts | ❌ None | ✅ Dashboard + notification |
+| Real-time Alerts | ❌ None | ✅ Live SCADA Dashboard |
 | Cost | Low | Low (ESP32 ~$5 each) |
 
 ---
 
 ## 🚀 Future Improvements
 
+- [x] Web dashboard with live sensor graphs
+- [x] Automatic fault isolation via timeout
 - [ ] SMS/Email alerts via Twilio or SMTP
-- [ ] Web dashboard with live sensor graphs
 - [ ] GPS-based precise fault location
 - [ ] Solar-powered field deployment
-- [ ] Machine learning for predictive fault detection
 
 ---
 
